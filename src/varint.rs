@@ -1,4 +1,5 @@
-use crate::hex::HexStream;
+use crate::hex::HexCursor;
+use std::io;
 
 pub struct VarInt;
 
@@ -19,7 +20,7 @@ impl VarInt {
 }
 
 impl VarInt {
-    pub fn num_bytes(first_byte: u8) -> u8 {
+    pub fn num_bytes(first_byte: u8) -> (u8, u8) {
         let num_bytes = match first_byte {
             0..=252 => 1,
             253 => 2,
@@ -27,7 +28,7 @@ impl VarInt {
             255 => 8,
         };
 
-        num_bytes
+        (first_byte, num_bytes)
     }
 
     pub fn num_inputs(bytea: &[u8]) -> u64 {
@@ -43,11 +44,26 @@ impl VarInt {
         num_inputs
     }
 
-    pub fn from_stream(s: &mut HexStream) -> u64 {
-        // TODO cleanup, should be able to do direclty in this function?
-        let num_input_bytes = VarInt::num_bytes(s.read(1).unwrap()[0]) as usize;
-        let num_inputs = VarInt::num_inputs(s.read(num_input_bytes).unwrap().as_slice());
-        num_inputs
+    pub fn from_stream(s: &mut HexCursor) -> Result<u64, io::Error> {
+        let first_byte = s.read(1)?;
+        let first_byte = first_byte.get(0).ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "No elements in vector."))?;
+
+        let value = match first_byte {
+            0..=252 => *first_byte as u64,
+            253 => {
+                let bytea = s.read(2)?;
+                u64::from_le_bytes([bytea[0], bytea[1], 0, 0, 0, 0, 0, 0])
+            },
+            254 => {
+                let bytea = s.read(4)?;
+                u64::from_le_bytes([bytea[0], bytea[1], bytea[2], bytea[3], 0, 0, 0, 0])
+            },
+            255 => {
+                let bytea = s.read(8)?;
+                u64::from_le_bytes([bytea[0], bytea[1], bytea[2], bytea[3], bytea[4], bytea[5], bytea[6], bytea[7]])
+            }
+        };
+        Ok(value)
     }
 }
 
